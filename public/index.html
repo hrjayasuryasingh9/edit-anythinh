@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edit Anything</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#6b6b6b; --line:#d9d9d9; --accent:#4f46e5; --card:#f6f6f8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --fg:#f0f0f2; --muted:#9a9aa2; --line:#33333a; --accent:#818cf8; --card:#1d1d21; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { margin:0 0 4px; font-size:1.6rem; }
+  p.sub { margin:0 0 20px; color:var(--muted); }
+  .drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:28px; text-align:center; cursor:pointer; background:var(--card); }
+  .drop.over { border-color:var(--accent); }
+  .thumbs { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .thumb { position:relative; width:96px; }
+  .thumb img { width:96px; height:96px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+  .thumb .tag { position:absolute; left:4px; bottom:4px; font-size:.7rem; padding:1px 6px; border-radius:6px; background:rgba(0,0,0,.65); color:#fff; }
+  .thumb .rm { position:absolute; top:-6px; right:-6px; width:22px; height:22px; padding:0; border-radius:50%; background:#d6336c; font-size:14px; line-height:1; }
+  textarea { width:100%; margin-top:16px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); font:inherit; resize:vertical; min-height:200px; }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button { padding:10px 18px; border:0; border-radius:10px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.secondary { background:var(--card); color:var(--fg); border:1px solid var(--line); }
+  a.btn { display:inline-block; margin-top:10px; padding:10px 18px; border-radius:10px; background:var(--accent); color:#fff; text-decoration:none; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .result { margin-top:24px; }
+  figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; }
+  figcaption { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
+  figure img { width:100%; border-radius:8px; display:block; }
+  .status { margin-top:12px; color:var(--muted); }
+  .error { color:#d6336c; }
+  [hidden] { display:none !important; }
+  button, a.btn, .drop { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+  @media (max-width:640px) {
+    main { padding:16px 16px calc(32px + env(safe-area-inset-bottom)); }
+    h1 { font-size:1.35rem; }
+    p.sub { font-size:.9rem; }
+    .drop { padding:22px 12px; }
+    textarea { min-height:140px; }
+    .row { flex-direction:column; }
+    .row button, a.btn { width:100%; min-height:48px; text-align:center; }
+    a.btn { display:block; line-height:28px; }
+    .thumb, .thumb img { width:calc((100vw - 32px - 20px) / 3); }
+    .thumb img { height:calc((100vw - 32px - 20px) / 3); }
+    .thumb .rm { width:28px; height:28px; top:-8px; right:-8px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Edit Anything</h1>
+  <p class="sub">Upload one or more photos, say what to change, get the edited image back. With several photos, the first is edited and the rest are references.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="image/*" multiple hidden>
+    <span id="dropText">Click or drop photos here (up to 8)</span>
+  </label>
+  <div class="thumbs" id="thumbs"></div>
+
+  <textarea id="prompt" rows="9" placeholder="e.g. Change the background to a beach at sunset. Or: put the person from photo 2 into photo 1."></textarea>
+  <div class="row">
+    <button id="go" disabled>Edit image</button>
+    <button id="useResult" class="secondary" hidden>Edit this result again</button>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="result" id="result" hidden>
+    <figure>
+      <figcaption>Edited</figcaption>
+      <img id="after" alt="Edited">
+      <a id="download" class="btn">Download image</a>
+    </figure>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const MAX = 8;
+let images = []; // data URLs; images[0] is the base image
+
+function render() {
+  $("thumbs").replaceChildren(...images.map((src, i) => {
+    const box = document.createElement("div");
+    box.className = "thumb";
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "Photo " + (i + 1);
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = i === 0 ? "Base" : "Photo " + (i + 1);
+    const rm = document.createElement("button");
+    rm.className = "rm";
+    rm.type = "button";
+    rm.textContent = "x";
+    rm.title = "Remove";
+    rm.onclick = () => { images.splice(i, 1); render(); };
+    box.append(img, tag, rm);
+    return box;
+  }));
+  $("go").disabled = images.length === 0;
+  $("dropText").textContent = images.length
+    ? "Click or drop to add more photos (" + images.length + "/" + MAX + ")"
+    : "Click or drop photos here (up to 8)";
+}
+
+function addFiles(fileList) {
+  const files = [...fileList].filter((f) => f.type.startsWith("image/")).slice(0, MAX - images.length);
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = () => { images.push(reader.result); render(); };
+    reader.readAsDataURL(file);
+  }
+}
+
+$("file").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+$("drop").ondragover = (e) => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); };
+// Paste screenshots / copied images straight in
+document.onpaste = (e) => addFiles([...e.clipboardData.files]);
+
+function showError(message) {
+  const span = document.createElement("span");
+  span.className = "error";
+  span.textContent = message;
+  $("status").replaceChildren(span);
+}
+
+$("go").onclick = async () => {
+  const prompt = $("prompt").value.trim();
+  if (!prompt) return showError("Describe the edit first.");
+  $("go").disabled = true;
+  $("status").textContent = "Editing... this can take 10-60 seconds.";
+  try {
+    const res = await fetch("/api/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images, prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Edit failed");
+    $("after").src = data.image;
+    $("download").href = data.image;
+    $("download").download = "edited.png";
+    $("result").hidden = false;
+    $("useResult").hidden = false;
+    $("status").textContent = "";
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    $("go").disabled = images.length === 0;
+  }
+};
+
+// Continue from the result: it becomes the base image; photos you added stay as references.
+$("useResult").onclick = () => {
+  images = [$("after").src, ...images.slice(1)];
+  render();
+  $("prompt").focus();
+};
+</script>
+</body>
+</html>
