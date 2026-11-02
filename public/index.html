@@ -34,6 +34,29 @@
   .status { margin-top:12px; color:var(--muted); }
   .error { color:#d6336c; }
   [hidden] { display:none !important; }
+  .head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .head button { margin-top:2px; }
+  figure .row { margin-top:10px; }
+  figure .row .btn, figure .row a.btn { margin-top:0; }
+  .panel { position:fixed; inset:0; z-index:90; background:var(--bg); overflow:auto; padding:16px; }
+  .panel .bar { max-width:960px; margin:0 auto 16px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .panel h2 { margin:0; font-size:1.3rem; }
+  .grid { max-width:960px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px; }
+  .item { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+  .item img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; cursor:zoom-in; }
+  .item .meta { font-size:.8rem; color:var(--muted); }
+  .item .prompt { font-size:.85rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .item .acts { display:flex; gap:6px; flex-wrap:wrap; }
+  .item .acts button { padding:6px 10px; font-size:.8rem; border-radius:8px; }
+  .empty { max-width:960px; margin:40px auto; text-align:center; color:var(--muted); }
+  .thumb img, figure img { cursor:zoom-in; }
+  .viewer { position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.92); display:flex; align-items:center; justify-content:center; padding:16px; }
+  .viewer img { max-width:100%; max-height:100%; object-fit:contain; cursor:zoom-out; }
+  .viewer .cap { position:absolute; left:16px; top:16px; color:#fff; font-size:.9rem; background:rgba(0,0,0,.5); padding:4px 10px; border-radius:8px; }
+  .viewer button { position:absolute; background:rgba(255,255,255,.18); color:#fff; padding:0; width:44px; height:44px; border-radius:50%; font-size:22px; line-height:1; }
+  .viewer .close { top:12px; right:12px; }
+  .viewer .prev { left:12px; top:50%; transform:translateY(-50%); }
+  .viewer .next { right:12px; top:50%; transform:translateY(-50%); }
   button, a.btn, .drop { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
   @media (max-width:640px) {
     main { padding:16px 16px calc(32px + env(safe-area-inset-bottom)); }
@@ -52,7 +75,10 @@
 </head>
 <body>
 <main>
-  <h1>Edit Anything</h1>
+  <div class="head">
+    <h1>Edit Anything</h1>
+    <button id="historyBtn" class="secondary" type="button">History</button>
+  </div>
   <p class="sub">Upload one or more photos, say what to change, get the edited image back. With several photos, the first is edited and the rest are references.</p>
 
   <label class="drop" id="drop">
@@ -71,11 +97,35 @@
   <div class="result" id="result" hidden>
     <figure>
       <figcaption>Edited</figcaption>
-      <img id="after" alt="Edited">
-      <a id="download" class="btn">Download image</a>
+      <img id="after" alt="Edited" title="Click to view full screen">
+      <div class="row">
+        <button id="share" type="button">Share</button>
+        <a id="download" class="btn">Save / Download</a>
+        <button id="viewResult" class="secondary" type="button">View full screen</button>
+      </div>
     </figure>
   </div>
 </main>
+
+<div class="panel" id="panel" hidden>
+  <div class="bar">
+    <h2>History</h2>
+    <span style="display:flex; gap:8px">
+      <button id="clearHistory" class="secondary" type="button">Clear all</button>
+      <button id="closeHistory" type="button">Close</button>
+    </span>
+  </div>
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" hidden>No generations yet. Edited images will show up here.</p>
+</div>
+
+<div class="viewer" id="viewer" hidden>
+  <span class="cap" id="viewCap"></span>
+  <button class="close" id="viewClose" type="button" title="Close (Esc)">&times;</button>
+  <button class="prev" id="viewPrev" type="button" title="Previous">&#8249;</button>
+  <img id="viewImg" alt="">
+  <button class="next" id="viewNext" type="button" title="Next">&#8250;</button>
+</div>
 <script>
 const $ = (id) => document.getElementById(id);
 const MAX = 8;
@@ -96,7 +146,8 @@ function render() {
     rm.type = "button";
     rm.textContent = "x";
     rm.title = "Remove";
-    rm.onclick = () => { images.splice(i, 1); render(); };
+    rm.onclick = (e) => { e.stopPropagation(); images.splice(i, 1); render(); };
+    img.onclick = () => openViewer(images.map((s, n) => ({ src: s, cap: n === 0 ? "Base" : "Photo " + (n + 1) })), i);
     box.append(img, tag, rm);
     return box;
   }));
@@ -148,11 +199,163 @@ $("go").onclick = async () => {
     $("result").hidden = false;
     $("useResult").hidden = false;
     $("status").textContent = "";
+    saveHistory(data.image, prompt);
   } catch (err) {
     showError(err.message);
   } finally {
     $("go").disabled = images.length === 0;
   }
+};
+
+// Full-screen viewer
+let viewItems = [], viewIndex = 0;
+function showViewer() {
+  const item = viewItems[viewIndex];
+  $("viewImg").src = item.src;
+  $("viewCap").textContent = item.cap + (viewItems.length > 1 ? " (" + (viewIndex + 1) + "/" + viewItems.length + ")" : "");
+  $("viewPrev").hidden = $("viewNext").hidden = viewItems.length < 2;
+}
+function openViewer(items, index) {
+  viewItems = items;
+  viewIndex = index;
+  showViewer();
+  $("viewer").hidden = false;
+}
+function closeViewer() { $("viewer").hidden = true; }
+function stepViewer(d) {
+  viewIndex = (viewIndex + d + viewItems.length) % viewItems.length;
+  showViewer();
+}
+$("viewClose").onclick = closeViewer;
+$("viewImg").onclick = closeViewer;
+$("viewer").onclick = (e) => { if (e.target === $("viewer")) closeViewer(); };
+$("viewPrev").onclick = () => stepViewer(-1);
+$("viewNext").onclick = () => stepViewer(1);
+document.addEventListener("keydown", (e) => {
+  if ($("viewer").hidden) return;
+  if (e.key === "Escape") closeViewer();
+  else if (e.key === "ArrowLeft" && viewItems.length > 1) stepViewer(-1);
+  else if (e.key === "ArrowRight" && viewItems.length > 1) stepViewer(1);
+});
+const viewResult = () => openViewer([{ src: $("after").src, cap: "Edited" }], 0);
+$("after").onclick = viewResult;
+$("viewResult").onclick = viewResult;
+
+// Share / save
+function downloadImage(src, name) {
+  const a = document.createElement("a");
+  a.href = src;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+// Opens the phone's native share sheet (Instagram, WhatsApp, Messages, ...) with the image attached.
+async function shareImage(src, name = "edited.png") {
+  try {
+    const blob = await (await fetch(src)).blob();
+    const file = new File([blob], name, { type: blob.type || "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Edited image" });
+    } else {
+      downloadImage(src, name);
+      $("status").textContent = "Sharing isn't supported in this browser (it needs HTTPS or localhost), so the image was downloaded instead.";
+    }
+  } catch (err) {
+    if (err.name !== "AbortError") showError("Couldn't share: " + err.message);
+  }
+}
+$("share").onclick = () => shareImage($("after").src);
+
+// History, kept in this browser's IndexedDB
+function historyDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("edit-anything", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("history", { keyPath: "id", autoIncrement: true });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function historyTx(mode, fn) {
+  const db = await historyDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("history", mode);
+    const out = fn(tx.objectStore("history"));
+    tx.oncomplete = () => resolve(out.result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function saveHistory(src, prompt) {
+  try {
+    const blob = await (await fetch(src)).blob();
+    await historyTx("readwrite", (s) => s.add({ blob, prompt, time: Date.now() }));
+  } catch (err) { console.warn("History not saved:", err); }
+}
+
+let historyUrls = [];
+async function openHistory() {
+  $("panel").hidden = false;
+  historyUrls.forEach(URL.revokeObjectURL);
+  historyUrls = [];
+  let items = [];
+  try { items = (await historyTx("readonly", (s) => s.getAll())).reverse(); } catch (err) { console.warn(err); }
+  $("empty").hidden = items.length > 0;
+  $("clearHistory").hidden = items.length === 0;
+  $("grid").replaceChildren(...items.map((it) => {
+    const url = URL.createObjectURL(it.blob);
+    historyUrls.push(url);
+    const card = document.createElement("div");
+    card.className = "item";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = it.prompt;
+    img.onclick = () => openViewer([{ src: url, cap: "History" }], 0);
+    const prompt = document.createElement("div");
+    prompt.className = "prompt";
+    prompt.textContent = it.prompt;
+    prompt.title = it.prompt;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = new Date(it.time).toLocaleString();
+    const acts = document.createElement("div");
+    acts.className = "acts";
+    const btn = (label, fn, cls = "secondary") => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = cls;
+      b.textContent = label;
+      b.onclick = fn;
+      return b;
+    };
+    acts.append(
+      btn("Share", () => shareImage(url, "edited-" + it.id + ".png"), ""),
+      btn("Save", () => downloadImage(url, "edited-" + it.id + ".png")),
+      btn("Edit again", async () => {
+        images = [await blobToDataUrl(it.blob), ...images.slice(1)];
+        render();
+        $("prompt").value = it.prompt;
+        closeHistory();
+      }),
+      btn("Delete", async () => { await historyTx("readwrite", (s) => s.delete(it.id)); openHistory(); }),
+    );
+    card.append(img, prompt, meta, acts);
+    return card;
+  }));
+}
+function closeHistory() { $("panel").hidden = true; }
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+$("historyBtn").onclick = openHistory;
+$("closeHistory").onclick = closeHistory;
+$("clearHistory").onclick = async () => {
+  if (confirm("Delete all history?")) { await historyTx("readwrite", (s) => s.clear()); openHistory(); }
 };
 
 // Continue from the result: it becomes the base image; photos you added stay as references.
